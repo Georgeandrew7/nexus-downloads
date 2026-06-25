@@ -1,0 +1,58 @@
+#!/usr/bin/env sh
+#
+# pre-commit — guard for the PUBLIC Nexus downloads repo.
+#
+# This repository must contain ONLY documentation. The Nexus app installers are
+# published as GitHub *Release assets* (never committed). This hook refuses any
+# commit that adds source code or build/config files, so source can never leak
+# into this public repo by accident. See .githooks/README.md.
+#
+# One-time bypass, ONLY if a real doc is misflagged: git commit --no-verify
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+nl='
+'
+blocked=
+
+while IFS= read -r f; do
+	[ -z "$f" ] && continue
+	case "$f" in
+		.githooks/*) continue ;;   # allow the hook tooling itself
+	esac
+
+	lower=$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]')
+	case "$lower" in
+		# ---- source code by extension ----
+		*.rs|*.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.vue|*.svelte|*.astro|\
+		*.py|*.go|*.rb|*.java|*.kt|*.kts|*.c|*.cc|*.cpp|*.cxx|*.h|*.hpp|\
+		*.cs|*.php|*.swift|*.m|*.mm|*.scala|*.dart|*.lua|\
+		*.css|*.scss|*.sass|*.less|*.html|*.htm|\
+		*.sql|*.proto|*.graphql|*.gql|\
+		*.sh|*.bash|*.zsh|*.fish|*.ps1|*.bat|*.cmd)
+			blocked="$blocked  $f$nl" ;;
+		# ---- build manifests / configs that reveal the codebase ----
+		cargo.toml|*/cargo.toml|cargo.lock|*/cargo.lock|\
+		package.json|*/package.json|package-lock.json|*/package-lock.json|\
+		pnpm-lock.yaml|*/pnpm-lock.yaml|yarn.lock|*/yarn.lock|\
+		*tsconfig*.json|*vite.config.*|tauri.conf.json|*/tauri.conf.json|*.tauri.conf.json|\
+		dockerfile|*/dockerfile|dockerfile.*|*/dockerfile.*|\
+		docker-compose*.yml|*/docker-compose*.yml|docker-compose*.yaml|\
+		makefile|*/makefile|.env|.env.*|*/.env|*/.env.*)
+			blocked="$blocked  $f$nl" ;;
+	esac
+done <<EOF
+$staged
+EOF
+
+[ -z "$blocked" ] && exit 0
+
+printf '\n\033[1;31m⛔  Commit blocked — this PUBLIC repo refuses source code.\033[0m\n\n'
+printf 'Only documentation belongs here; installers are published as Release assets,\n'
+printf 'never committed. These staged files look like source or build config:\n\n'
+printf '\033[33m%s\033[0m\n' "$blocked"
+printf 'Remove them from the commit:\n'
+printf '  git restore --staged <file>\n\n'
+printf '(If a real doc was misflagged: rename it, or bypass once with  git commit --no-verify)\n\n'
+exit 1
